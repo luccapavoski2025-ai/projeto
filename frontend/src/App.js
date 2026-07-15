@@ -33,14 +33,17 @@ function ProtectedRoute({ children }) {
 
 function RoleHome() {
   const { user } = useAuth();
-  if (user?.role === "student") return <Navigate to="/minhas-atividades" replace />;
+  if (!user) return <Navigate to="/" replace />;
+  if (!user.role) return <Navigate to="/configuracoes" replace />;
+  if (user.role === "student") return <Navigate to="/minhas-atividades" replace />;
   return <Navigate to="/dashboard" replace />;
 }
 
 function RequireRole({ role, children }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/" replace />;
-  if (user.role !== role) return <Navigate to="/" replace />;
+  if (!user.role) return <Navigate to="/configuracoes" replace />;
+  if (user.role !== role) return <Navigate to="/home" replace />;
   return children;
 }
 

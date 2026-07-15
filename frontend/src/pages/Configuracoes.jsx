@@ -19,6 +19,12 @@ export default function Configuracoes() {
       params.delete("classroom");
       setParams(params, { replace: true });
     }
+    const err = params.get("classroom_error");
+    if (err) {
+      toast.error(`Falha ao conectar: ${err}`, { duration: 12000 });
+      params.delete("classroom_error");
+      setParams(params, { replace: true });
+    }
   }, [params, setParams, refresh]);
 
   const handleConnect = async () => {

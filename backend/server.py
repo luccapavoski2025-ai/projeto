@@ -218,21 +218,29 @@ async def classroom_oauth_start(user: User = Depends(get_current_user)):
 
 
 @api_router.get("/classroom/oauth/callback")
-async def classroom_oauth_callback(request: Request, code: str = None, state: str = None):
+async def classroom_oauth_callback(request: Request, code: str = None, state: str = None, error: str = None, error_description: str = None):
+    from fastapi.responses import RedirectResponse
+    import urllib.parse as _url
+
+    # Google returned an error (e.g. access_denied, redirect_uri_mismatch)
+    if error:
+        msg = error_description or error
+        return RedirectResponse(url=f"{FRONTEND_URL}/configuracoes?classroom_error={_url.quote(msg)}")
+
     if not code or not state:
-        raise HTTPException(status_code=400, detail="Faltando code ou state")
+        return RedirectResponse(url=f"{FRONTEND_URL}/configuracoes?classroom_error={_url.quote('Faltando code ou state')}")
+
     state_doc = await db.oauth_states.find_one({"state": state}, {"_id": 0})
     if not state_doc:
-        raise HTTPException(status_code=400, detail="State inválido")
+        return RedirectResponse(url=f"{FRONTEND_URL}/configuracoes?classroom_error={_url.quote('State inválido ou expirado')}")
 
     flow = _build_flow(state)
     flow.redirect_uri = GOOGLE_CLASSROOM_REDIRECT_URI
-    # Google may include additional scopes in the callback response. Disable strict scope match.
     try:
         flow.fetch_token(code=code)
     except Exception as e:
         logger.exception("Token fetch falhou")
-        raise HTTPException(status_code=400, detail=f"Falha ao obter token: {e}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/configuracoes?classroom_error={_url.quote(f'Falha ao obter token: {e}')}")
 
     creds = flow.credentials
     user_id = state_doc["user_id"]
@@ -252,8 +260,6 @@ async def classroom_oauth_callback(request: Request, code: str = None, state: st
     )
     await db.oauth_states.delete_one({"state": state})
 
-    # Redirect to configuracoes page
-    from fastapi.responses import RedirectResponse
     return RedirectResponse(url=f"{FRONTEND_URL}/configuracoes?classroom=connected")
 
 

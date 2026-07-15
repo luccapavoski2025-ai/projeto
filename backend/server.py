@@ -45,7 +45,10 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
 CLASSROOM_SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
     "https://www.googleapis.com/auth/classroom.rosters.readonly",
-    "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+    "https://www.googleapis.com/auth/classroom.coursework.students",
+    "https://www.googleapis.com/auth/classroom.coursework.me",
+    "https://www.googleapis.com/auth/classroom.student-submissions.students",
+    "https://www.googleapis.com/auth/classroom.student-submissions.me.readonly",
     "https://www.googleapis.com/auth/classroom.profile.emails",
     "https://www.googleapis.com/auth/classroom.profile.photos",
     "openid",
@@ -164,12 +167,14 @@ async def auth_session(payload: AuthSessionRequest, response: Response):
 @api_router.get("/auth/me")
 async def auth_me(user: User = Depends(get_current_user)):
     classroom = await db.classroom_tokens.find_one({"user_id": user.user_id}, {"_id": 0})
+    role = classroom.get("role") if classroom else None
     return {
         "user_id": user.user_id,
         "email": user.email,
         "name": user.name,
         "picture": user.picture,
         "classroom_connected": bool(classroom),
+        "role": role,
     }
 
 
@@ -255,6 +260,20 @@ async def classroom_oauth_callback(request: Request, code: str = None, state: st
     creds = flow.credentials
     user_id = state_doc["user_id"]
 
+    # Detect role by inspecting Classroom API access
+    role = "unknown"
+    try:
+        service = build("classroom", "v1", credentials=creds, cache_discovery=False)
+        teacher_courses = service.courses().list(teacherId="me", pageSize=1).execute().get("courses", [])
+        if teacher_courses:
+            role = "teacher"
+        else:
+            student_courses = service.courses().list(studentId="me", pageSize=1).execute().get("courses", [])
+            if student_courses:
+                role = "student"
+    except Exception:
+        logger.exception("Falha ao detectar role no callback")
+
     await db.classroom_tokens.update_one(
         {"user_id": user_id},
         {
@@ -263,6 +282,7 @@ async def classroom_oauth_callback(request: Request, code: str = None, state: st
                 "refresh_token": creds.refresh_token,
                 "access_token": creds.token,
                 "scopes": creds.scopes,
+                "role": role,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         },
@@ -512,6 +532,292 @@ async def student_detail(student_id: str, user: User = Depends(get_current_user)
         "courses": student_courses,
         "ai": ai,
     }
+
+
+# ---- Role helpers ----
+async def _require_role(user: User, expected: str) -> dict:
+    tok = await db.classroom_tokens.find_one({"user_id": user.user_id}, {"_id": 0})
+    if not tok:
+        raise HTTPException(status_code=428, detail="Google Classroom não conectado")
+    if tok.get("role") != expected:
+        raise HTTPException(status_code=403, detail=f"Acesso permitido apenas a {expected}s")
+    return tok
+
+
+@api_router.get("/me/role")
+async def get_role(user: User = Depends(get_current_user)):
+    tok = await db.classroom_tokens.find_one({"user_id": user.user_id}, {"_id": 0})
+    return {"role": tok.get("role") if tok else None, "classroom_connected": bool(tok)}
+
+
+# ---- Teacher: create coursework (posts to Classroom) ----
+class CreateCourseworkRequest(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    max_points: Optional[float] = 100.0
+    due_date: Optional[str] = None  # ISO YYYY-MM-DD
+    due_time: Optional[str] = None  # HH:MM
+
+
+@api_router.post("/classroom/courses/{course_id}/coursework")
+async def create_coursework(course_id: str, payload: CreateCourseworkRequest, user: User = Depends(get_current_user)):
+    await _require_role(user, "teacher")
+    service = await _classroom_service(user.user_id)
+    body = {
+        "title": payload.title,
+        "description": payload.description or "",
+        "workType": "ASSIGNMENT",
+        "state": "PUBLISHED",
+        "maxPoints": payload.max_points or 100,
+    }
+    if payload.due_date:
+        try:
+            y, m, d = payload.due_date.split("-")
+            body["dueDate"] = {"year": int(y), "month": int(m), "day": int(d)}
+        except Exception:
+            pass
+    if payload.due_time:
+        try:
+            hh, mm = payload.due_time.split(":")
+            body["dueTime"] = {"hours": int(hh), "minutes": int(mm)}
+        except Exception:
+            pass
+    try:
+        cw = service.courses().courseWork().create(courseId=course_id, body=body).execute()
+        return cw
+    except HttpError as e:
+        raise HTTPException(status_code=502, detail=f"Erro Google Classroom: {e}")
+
+
+# ---- Teacher: list submissions ----
+@api_router.get("/classroom/courses/{course_id}/coursework/{cw_id}")
+async def get_coursework(course_id: str, cw_id: str, user: User = Depends(get_current_user)):
+    service = await _classroom_service(user.user_id)
+    try:
+        cw = service.courses().courseWork().get(courseId=course_id, id=cw_id).execute()
+        return cw
+    except HttpError as e:
+        raise HTTPException(status_code=502, detail=f"Erro: {e}")
+
+
+@api_router.get("/classroom/courses/{course_id}/coursework/{cw_id}/submissions")
+async def list_submissions(course_id: str, cw_id: str, user: User = Depends(get_current_user)):
+    await _require_role(user, "teacher")
+    service = await _classroom_service(user.user_id)
+    try:
+        subs = service.courses().courseWork().studentSubmissions().list(
+            courseId=course_id, courseWorkId=cw_id, pageSize=200
+        ).execute().get("studentSubmissions", [])
+        students = service.courses().students().list(courseId=course_id, pageSize=200).execute().get("students", [])
+        by_id = {s.get("userId"): s.get("profile", {}) for s in students}
+        for s in subs:
+            uid = s.get("userId")
+            p = by_id.get(uid, {})
+            s["_student"] = {
+                "name": p.get("name", {}).get("fullName", "Aluno"),
+                "email": p.get("emailAddress", ""),
+                "photo": p.get("photoUrl", ""),
+            }
+        return {"submissions": subs}
+    except HttpError as e:
+        raise HTTPException(status_code=502, detail=f"Erro: {e}")
+
+
+@api_router.get("/classroom/courses/{course_id}/coursework/{cw_id}/submissions/{sub_id}")
+async def get_submission(course_id: str, cw_id: str, sub_id: str, user: User = Depends(get_current_user)):
+    service = await _classroom_service(user.user_id)
+    try:
+        sub = service.courses().courseWork().studentSubmissions().get(
+            courseId=course_id, courseWorkId=cw_id, id=sub_id
+        ).execute()
+        # Enrich with student profile
+        try:
+            profile = service.userProfiles().get(userId=sub["userId"]).execute()
+            sub["_student"] = {
+                "name": profile.get("name", {}).get("fullName", "Aluno"),
+                "email": profile.get("emailAddress", ""),
+                "photo": profile.get("photoUrl", ""),
+            }
+        except Exception:
+            pass
+        # Get coursework
+        try:
+            cw = service.courses().courseWork().get(courseId=course_id, id=cw_id).execute()
+            sub["_coursework"] = {"title": cw.get("title"), "description": cw.get("description"), "maxPoints": cw.get("maxPoints")}
+        except Exception:
+            pass
+        return sub
+    except HttpError as e:
+        raise HTTPException(status_code=502, detail=f"Erro: {e}")
+
+
+# ---- Teacher: submit final grade (posts to Classroom) ----
+class GradeRequest(BaseModel):
+    assigned_grade: float
+    draft_grade: Optional[float] = None
+    return_to_student: Optional[bool] = True
+
+
+@api_router.post("/classroom/courses/{course_id}/coursework/{cw_id}/submissions/{sub_id}/grade")
+async def grade_submission(course_id: str, cw_id: str, sub_id: str, payload: GradeRequest, user: User = Depends(get_current_user)):
+    await _require_role(user, "teacher")
+    service = await _classroom_service(user.user_id)
+    try:
+        body = {"assignedGrade": payload.assigned_grade, "draftGrade": payload.draft_grade if payload.draft_grade is not None else payload.assigned_grade}
+        updated = service.courses().courseWork().studentSubmissions().patch(
+            courseId=course_id,
+            courseWorkId=cw_id,
+            id=sub_id,
+            updateMask="assignedGrade,draftGrade",
+            body=body,
+        ).execute()
+        if payload.return_to_student:
+            try:
+                service.courses().courseWork().studentSubmissions().return_(
+                    courseId=course_id, courseWorkId=cw_id, id=sub_id
+                ).execute()
+            except HttpError:
+                pass
+        # Record the grading decision locally for audit
+        await db.grading_decisions.insert_one({
+            "teacher_id": user.user_id,
+            "course_id": course_id,
+            "coursework_id": cw_id,
+            "submission_id": sub_id,
+            "final_grade": payload.assigned_grade,
+            "returned": payload.return_to_student,
+            "graded_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return {"ok": True, "submission": updated}
+    except HttpError as e:
+        raise HTTPException(status_code=502, detail=f"Erro Google Classroom: {e}")
+
+
+# ---- AI Grading Assistant ----
+class AiGradeRequest(BaseModel):
+    assignment_title: str
+    assignment_description: Optional[str] = ""
+    max_points: Optional[float] = 100
+    student_text: str
+    student_name: Optional[str] = "Aluno"
+
+
+AI_GRADING_SYSTEM = """Você é um assistente pedagógico de correção. Ajuda o professor analisando a entrega do aluno.
+REGRAS CRÍTICAS:
+- NUNCA decida a nota final. Apenas SUGIRA uma faixa e destaque pontos.
+- Sempre lembre o professor de que a decisão final é dele(a).
+- Seja construtivo e específico com exemplos do texto do aluno.
+- Responda SEMPRE em JSON válido conforme o schema abaixo, nada mais.
+
+Schema JSON obrigatório:
+{
+  "strengths": [string, ...],           // 2-4 pontos fortes específicos
+  "improvements": [string, ...],        // 2-4 pontos de melhoria específicos
+  "key_checkpoints": [string, ...],     // 3-5 aspectos que o professor deve verificar manualmente
+  "suggested_range": {"min": number, "max": number},  // faixa sugerida dentro de max_points
+  "reasoning": string,                  // 1-2 frases explicando a análise
+  "professor_reminder": string          // frase reforçando que a decisão final é do professor
+}"""
+
+
+@api_router.post("/ai/grade-help")
+async def ai_grade_help(payload: AiGradeRequest, user: User = Depends(get_current_user)):
+    await _require_role(user, "teacher")
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        raise HTTPException(status_code=500, detail="EMERGENT_LLM_KEY não configurada")
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    import json as _json
+
+    prompt = f"""Corrija esta entrega ajudando o professor.
+
+TÍTULO DA TAREFA: {payload.assignment_title}
+DESCRIÇÃO DA TAREFA: {payload.assignment_description or '(não fornecida)'}
+PONTUAÇÃO MÁXIMA: {payload.max_points}
+ALUNO: {payload.student_name}
+
+TEXTO ENTREGUE PELO ALUNO:
+---
+{payload.student_text}
+---
+
+Analise e retorne o JSON conforme o schema. Lembre-se: você SUGERE uma faixa, o professor decide."""
+
+    session_id = f"grade_{user.user_id}_{uuid.uuid4().hex[:8]}"
+    chat = LlmChat(
+        api_key=key,
+        session_id=session_id,
+        system_message=AI_GRADING_SYSTEM,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    try:
+        resp = await chat.send_message(UserMessage(text=prompt))
+        text = resp if isinstance(resp, str) else str(resp)
+        # Try parse JSON
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1:
+            parsed = _json.loads(text[start:end + 1])
+        else:
+            parsed = {"raw": text}
+        parsed["professor_reminder"] = parsed.get(
+            "professor_reminder",
+            "Esta é apenas uma sugestão da IA. A decisão final da correção é sua.",
+        )
+        # Log AI usage
+        await db.ai_grading_logs.insert_one({
+            "teacher_id": user.user_id,
+            "student_name": payload.student_name,
+            "assignment_title": payload.assignment_title,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return parsed
+    except Exception as e:
+        logger.exception("AI grading falhou")
+        raise HTTPException(status_code=500, detail=f"Falha na IA: {e}")
+
+
+# ---- Student endpoints ----
+@api_router.get("/student/coursework")
+async def student_coursework(user: User = Depends(get_current_user)):
+    await _require_role(user, "student")
+    service = await _classroom_service(user.user_id)
+    courses = service.courses().list(studentId="me", pageSize=100).execute().get("courses", [])
+    out = []
+    for c in courses:
+        try:
+            cw_list = service.courses().courseWork().list(courseId=c["id"], pageSize=100).execute().get("courseWork", [])
+        except HttpError:
+            cw_list = []
+        for cw in cw_list:
+            if cw.get("state") != "PUBLISHED":
+                continue
+            out.append({
+                "course_id": c["id"],
+                "course_name": c.get("name", ""),
+                "id": cw["id"],
+                "title": cw.get("title", ""),
+                "description": cw.get("description", ""),
+                "max_points": cw.get("maxPoints"),
+                "due_date": cw.get("dueDate"),
+                "state": cw.get("state"),
+            })
+    return {"coursework": out}
+
+
+@api_router.get("/student/courses/{course_id}/coursework/{cw_id}")
+async def student_coursework_detail(course_id: str, cw_id: str, user: User = Depends(get_current_user)):
+    await _require_role(user, "student")
+    service = await _classroom_service(user.user_id)
+    try:
+        cw = service.courses().courseWork().get(courseId=course_id, id=cw_id).execute()
+        my_subs = service.courses().courseWork().studentSubmissions().list(
+            courseId=course_id, courseWorkId=cw_id, userId="me"
+        ).execute().get("studentSubmissions", [])
+        return {"coursework": cw, "my_submission": my_subs[0] if my_subs else None}
+    except HttpError as e:
+        raise HTTPException(status_code=502, detail=f"Erro: {e}")
 
 
 # ---- Health ----

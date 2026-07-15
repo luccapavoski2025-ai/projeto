@@ -3,7 +3,8 @@ import { useParams, Link } from "react-router-dom";
 import useSWR from "swr";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Users, ClipboardList, Calendar } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft, Users, ClipboardList, Calendar, Plus } from "lucide-react";
 
 const fetcher = (url) => api.get(url).then((r) => r.data);
 
@@ -22,9 +23,17 @@ export default function TurmaDetalhe() {
         <ArrowLeft className="h-4 w-4" /> Voltar para turmas
       </Link>
 
-      <div>
-        <h1 className="font-display text-3xl font-bold tracking-tight">{course.name}</h1>
-        <p className="text-muted-foreground mt-1">{course.section || course.descriptionHeading}</p>
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-bold tracking-tight">{course.name}</h1>
+          <p className="text-muted-foreground mt-1">{course.section || course.descriptionHeading}</p>
+        </div>
+        <Link to={`/turmas/${id}/nova-tarefa`}>
+          <Button data-testid="new-task-button" size="lg">
+            <Plus className="h-4 w-4 mr-1" />
+            Nova Tarefa
+          </Button>
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -81,12 +90,16 @@ export default function TurmaDetalhe() {
           <h2 className="font-display font-semibold text-lg mb-4">Atividades</h2>
           <div className="space-y-2 max-h-[440px] overflow-y-auto">
             {coursework.map((cw) => (
-              <div key={cw.id} className="p-3 rounded-lg border border-border">
+              <Link
+                key={cw.id}
+                to={`/turmas/${id}/atividades/${cw.id}`}
+                className="block p-3 rounded-lg border border-border hover:border-primary/40 hover:bg-muted/40 transition-colors"
+              >
                 <p className="text-sm font-medium">{cw.title}</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {cw.workType} • {cw.state}
                 </p>
-              </div>
+              </Link>
             ))}
             {coursework.length === 0 && <p className="text-sm text-muted-foreground">Sem atividades.</p>}
           </div>

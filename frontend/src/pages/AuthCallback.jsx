@@ -25,9 +25,8 @@ export default function AuthCallback() {
       try {
         const res = await api.post("/auth/session", { session_id: sessionId });
         setUser(res.data);
-        // clean URL fragment
-        window.history.replaceState(null, "", "/dashboard");
-        navigate("/dashboard", { replace: true });
+        window.history.replaceState(null, "", "/home");
+        navigate("/home", { replace: true });
       } catch (e) {
         navigate("/", { replace: true });
       }

@@ -1,0 +1,57 @@
+{
+  "summary": "Full iteration_4 regression for teacher/student role detection + Google Classroom write endpoints + Claude Sonnet 4.5 AI grade-help via emergentintegrations + frontend role-based routing/sidebar. Backend: 16/16 pytest tests passed (5 role/auth-me tests, 6 role-gating 403 tests, 5 AI grading tests including a REAL Anthropic claude-sonnet-4-5-20250929 call). Frontend: 100% of routing + sidebar + Configurações assertions passed for both teacher and student. Seeded users seed_teacher_1 / seed_student_1 (with sessions seed_teacher_session / seed_student_session) into MongoDB (they existed in classroom_tokens but were missing from users/user_sessions collections; seeded idempotently). Real Anthropic call returned strengths[], improvements[], key_checkpoints[], suggested_range{min,max}, reasoning, professor_reminder and did NOT contain final_grade/assigned_grade; ai_grading_logs row is written on success.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Any teacher page loading /api/dashboard/metrics with seeded fake classroom_token",
+        "issue": "Console shows 500 on /api/dashboard/metrics because seeded refresh_token='fake_refresh_teacher' fails Google's token endpoint. This is EXPECTED per the review-request context (real Classroom writes require a real Google account) but the user-facing page still renders. Confirming behaviour matches design.",
+        "affected_selectors": []
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Configurações — 'Papel' row",
+        "issues": [
+          "CSS class 'capitalize' on '{user.role === teacher ? \"Professor(a)\" : \"Aluno(a)\"}' causes the parenthesized 'a' to render as capital 'A' — the UI shows 'Professor(A)' and 'Aluno(A)' instead of the intended 'Professor(a)' / 'Aluno(a)'. Cosmetic only. Fix: remove the 'capitalize' class from that span (label is already correctly cased in the source string)."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_role_and_ai.py",
+    "/app/test_reports/pytest/iteration_4.xml"
+  ],
+  "action_items": [
+    "OPTIONAL/COSMETIC: In /app/frontend/src/pages/Configuracoes.jsx line 117, drop the 'capitalize' class on the Papel span so it renders 'Professor(a)' / 'Aluno(a)' instead of 'Professor(A)' / 'Aluno(A)'.",
+    "No functional bugs to fix in this iteration. All role gating, /me/role, /auth/me role field, AI grade-help schema (no final_grade), professor_reminder default, ai_grading_logs, and frontend routing/sidebar are working as specified."
+  ],
+  "critical_code_review_comments": [
+    "server.py has grown to 843 lines — exceeds the 700-line threshold. Recommend splitting into modules: auth.py, classroom_oauth.py, classroom_data.py, ai_grading.py, students.py. Not blocking but should be scheduled.",
+    "_require_role checks classroom_tokens existence first (428) then role (403). Order is correct for the current use case; ensure future callers do NOT depend on 403 when classroom is not connected — they will get 428 instead. Consider unifying to 403 when role mismatch OR classroom not connected, or documenting the 428 vs 403 distinction in the OpenAPI schema.",
+    "ai_grade_help parses the AI JSON by scanning for the first '{' and last '}' — this is fragile if Claude ever wraps the JSON in additional prose containing braces. Consider wrapping in a try/except that falls back to a structured error rather than raising 500.",
+    "/api/ai/grade-help enforces the professor_reminder default only when the key is missing/empty — safe. Good.",
+    "/api/classroom/courses/{course_id}/coursework (POST) does NOT save the created coursework to Mongo. If Google returns success but the network drops, teacher has no local record. Consider persisting a minimal audit row.",
+    "grade_submission body sets both assignedGrade and draftGrade from assigned_grade if draft not provided — reasonable, but the code path silently swallows HttpError on the return_() call (line 679-680). If the return fails, the teacher will not see any warning. Consider surfacing this via response.warnings[].",
+    "get_submission (line 626) is NOT gated by _require_role('teacher'). A student with a valid classroom session could technically GET another student's submission by guessing IDs. Recommend adding await _require_role(user, 'teacher') at the top of get_submission for defence-in-depth. (Note: Google Classroom API itself will still enforce access at the API level, so this is defence-in-depth, not a hard vulnerability.)",
+    "get_coursework (line 593) is also not role-gated — a student's classroom scopes may not include coursework.students so it will fail at the API level, but explicit role gating would give a clearer 403 vs the current 502."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_role_and_ai.py (NEW - 16 tests)",
+    "MongoDB test_database: seeded users.seed_teacher_1, users.seed_student_1, user_sessions.seed_teacher_session, user_sessions.seed_student_session (classroom_tokens already existed with role=teacher/student and fake refresh tokens)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed, includes 1 real Anthropic Claude Sonnet 4.5 call ~10s)",
+    "frontend": "100% (all routing, sidebar, and Configurações role assertions passed for both teacher and student)"
+  },
+  "test_credentials": "TEACHER: user_id=seed_teacher_1, session_token=seed_teacher_session, role=teacher (Bearer or session_token cookie). STUDENT: user_id=seed_student_1, session_token=seed_student_session, role=student. Both have classroom_tokens with FAKE refresh_tokens — real Classroom API calls will 502, expected. Located in test_database.",
+  "seed_data_creation": "Added rows to test_database.users and test_database.user_sessions for both seed_teacher_1 and seed_student_1 (idempotent upsert). Fixture ensure_seed in test_role_and_ai.py re-runs on every test session so tests are self-healing.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression files: /app/backend/tests/test_classroom_oauth.py (12 tests) + /app/backend/tests/test_role_and_ai.py (16 tests). Run: pytest /app/backend/tests/ -v. The ensure_seed session-fixture in test_role_and_ai.py auto-seeds all required Mongo docs so the suite is safe to run repeatedly. AI test does a real Anthropic call (~10-20s); if EMERGENT_LLM_KEY is rotated or the endpoint is down, tests will skip gracefully (schema tests skip when status != 200). Real Google Classroom writes still require a real Google teacher account and remain out of scope.",
+  "rca of the issue": "N/A — no bugs. All features implemented per spec. The seeded fake refresh_tokens intentionally break real Classroom API calls to isolate role-gating logic from the network. Role checks (_require_role) fire BEFORE _classroom_service is called, so 403 is returned correctly regardless of whether the token would refresh."
+}

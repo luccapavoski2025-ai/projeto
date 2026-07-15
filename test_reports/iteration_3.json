@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only regression for the OAUTHLIB_RELAX_TOKEN_SCOPE fix on the Google Classroom OAuth callback. All 12/12 pytest tests passed (10 pre-existing iteration_2 tests + 2 new tests targeting this fix). Verified: (1) os.environ.setdefault('OAUTHLIB_RELAX_TOKEN_SCOPE','1') at the top of /app/backend/server.py (lines 5-9, BEFORE any oauthlib/google imports) is executed on import and correctly sets the env var to '1' (test_server_module_sets_relax_scope_env_var). (2) With RELAX active, oauthlib.oauth2.WebApplicationClient.parse_request_body_response accepts a token response whose scope is 'classroom.student-submissions.students.readonly' when 'classroom.coursework.students.readonly' was originally requested — no Warning/exception raised (test_oauthlib_accepts_scope_mismatch_when_relax_is_set). This is exactly the mismatch pattern that produced the user-reported 'Falha ao obter token: Scope has changed from ... to ...'. (3) Full iteration_2 regression is green: GET /api/ 200, GET /api/auth/me with Bearer seed_test_session_educrm_1 200 (user_id=test_professor_1, classroom_connected=false), /api/dashboard/metrics 200, /api/classroom/oauth/start 200 with auth_url containing code_challenge & code_challenge_method=S256 and oauth_states.code_verifier persisted (43-128 chars, URL-safe) tied to test_professor_1, /api/classroom/oauth/start 401 without auth, /api/classroom/oauth/callback returns 302 to /configuracoes?classroom_error=... for all error branches (no code, access_denied, access_denied+description precedence, invalid state, missing only code). Real end-to-end Google token exchange with a real Google account is out of scope (needs browser + real user).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_classroom_oauth.py",
+    "/app/test_reports/pytest/iteration_3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix placement is correct: os.environ.setdefault('OAUTHLIB_RELAX_TOKEN_SCOPE','1') is set on lines 9 of server.py, BEFORE any oauthlib/google imports (google_auth_oauthlib.flow imported at line 28). oauthlib reads this env var during its module init, so ordering matters and is honored here.",
+    "Use of os.environ.setdefault (not =) is intentional and correct — it won't override a value set in the process environment via .env or supervisor, which is defensive.",
+    "server.py has grown to 537 lines (was 531). Still under the 700-line threshold but the classroom-OAuth routes are a natural split candidate for a follow-up refactor.",
+    "Downside of RELAX: if Google in the future returns a completely wrong/missing scope, the flow will still succeed and only fail at API-call time. Current CLASSROOM_SCOPES list is small and read-only so blast radius is acceptable, but consider logging the actual returned token.scopes after fetch_token for observability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_classroom_oauth.py (added TestOAuthlibRelaxScope class with 2 tests targeting the RELAX_TOKEN_SCOPE fix)"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 tests passed)",
+    "frontend": "not tested (per request: backend only)"
+  },
+  "test_credentials": "MongoDB test_database, user_sessions collection: session_token='seed_test_session_educrm_1' -> user_id='test_professor_1'. Verified present before the run.",
+  "seed_data_creation": "None. Reused existing seed. Tests clean up their own oauth_states documents.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression file /app/backend/tests/test_classroom_oauth.py now has 12 tests grouped into 4 classes: TestHealth (3), TestOAuthStart (2), TestOAuthCallback (5), TestOAuthlibRelaxScope (2 - NEW, covers this iteration's fix). Run: pytest /app/backend/tests/test_classroom_oauth.py -v. Real Google end-to-end token exchange still needs a browser + real Google Classroom teacher account and remains out of scope.",
+  "rca of the issue": "Root cause (already fixed by main agent): Google's authorization server sometimes narrows or renames the scopes returned in the token response (e.g. classroom.coursework.students.readonly → classroom.student-submissions.students.readonly). requests_oauthlib/oauthlib defaults to raising a Warning (converted to an exception in strict mode) when the returned scope set differs from what was requested, producing the user-visible 'Falha ao obter token: Scope has changed from ... to ...'. Fix: set OAUTHLIB_RELAX_TOKEN_SCOPE=1 in os.environ BEFORE oauthlib is imported. Placement at the top of /app/backend/server.py (lines 5-9, before line 28 'from google_auth_oauthlib.flow import Flow') guarantees correct import ordering. Verified by (a) reading the module and confirming os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE']=='1' after import, and (b) reproducing the exact scope-mismatch scenario against oauthlib.WebApplicationClient.parse_request_body_response — it now returns silently instead of raising. Full iteration_2 test suite still green (no regressions)."
+}

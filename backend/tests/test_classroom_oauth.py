@@ -165,3 +165,46 @@ class TestOAuthCallback:
             allow_redirects=False,
         )
         self._assert_redirect_with_error(r)
+
+
+# ---------- OAUTHLIB_RELAX_TOKEN_SCOPE fix ----------
+class TestOAuthlibRelaxScope:
+    """Verify the fix for: 'Scope has changed from ... to ...' error.
+
+    Re-executes the top-of-file env setup exactly the way server.py does it and
+    then confirms oauthlib does NOT raise when Google returns a different scope
+    than what was requested.
+    """
+
+    def test_server_module_sets_relax_scope_env_var(self):
+        # Read server.py and execute only its os.environ.setdefault lines in a
+        # fresh subprocess-like scope; this mirrors what happens on backend boot.
+        import subprocess, sys
+        code = (
+            "import os;"
+            "exec(open('/app/backend/server.py').read().split('import uuid')[0]);"
+            "print(os.environ.get('OAUTHLIB_RELAX_TOKEN_SCOPE'))"
+        )
+        out = subprocess.check_output([sys.executable, "-c", code], text=True).strip()
+        assert out == "1", f"expected '1', got {out!r}"
+
+    def test_oauthlib_accepts_scope_mismatch_when_relax_is_set(self):
+        # Simulate the exact failure Google produced ('classroom.coursework.students.readonly'
+        # replaced with 'classroom.student-submissions.students.readonly').
+        import json, os, importlib
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+        # Force reimport so the env var takes effect (in case a prior test cleared it)
+        import oauthlib.oauth2  # noqa: F401
+        importlib.reload(oauthlib.oauth2)
+        from oauthlib.oauth2 import WebApplicationClient
+        c = WebApplicationClient("cid")
+        body = json.dumps({
+            "access_token": "tok",
+            "token_type": "Bearer",
+            "scope": "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly",
+        })
+        # Should NOT raise (previously would raise a Warning-turned-Error)
+        c.parse_request_body_response(
+            body,
+            scope=["https://www.googleapis.com/auth/classroom.coursework.students.readonly"],
+        )

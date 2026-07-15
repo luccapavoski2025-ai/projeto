@@ -3,6 +3,12 @@
 REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 """
 import os
+# Must be set BEFORE importing oauthlib. Google sometimes returns a slightly
+# different set of scopes than requested (e.g. it replaces
+# classroom.coursework.students.readonly with classroom.student-submissions.students.readonly).
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "0")
+
 import uuid
 import logging
 import secrets

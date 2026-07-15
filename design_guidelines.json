@@ -1,0 +1,84 @@
+{
+  "theme": "light",
+  "typography": {
+    "headings": {
+      "family": "Manrope, sans-serif",
+      "weights": ["600", "700", "800"],
+      "classes": "font-sans tracking-tight"
+    },
+    "body": {
+      "family": "IBM Plex Sans, sans-serif",
+      "weights": ["400", "500", "600"],
+      "classes": "font-sans leading-relaxed"
+    }
+  },
+  "colors": {
+    "background": "210 40% 98%",
+    "foreground": "222.2 84% 4.9%",
+    "primary": "221 83% 53%",
+    "primary_foreground": "210 40% 98%",
+    "card": "0 0% 100%",
+    "card_foreground": "222.2 84% 4.9%",
+    "border": "214.3 31.8% 91.4%",
+    "muted": "210 40% 96.1%",
+    "muted_foreground": "215.4 16.3% 46.9%",
+    "chart_1": "221 83% 53%",
+    "chart_2": "212 96% 78%",
+    "chart_3": "224 76% 48%",
+    "chart_4": "201 96% 32%",
+    "chart_5": "199 89% 48%"
+  },
+  "visual_enhancers": {
+    "borders": "1px solid hsl(var(--border)), subtle and crisp. High-information density requires clear boundaries.",
+    "shadows": "Minimal flat design. Use shadow-sm for cards. Focus states should have ring-2 ring-primary/20",
+    "radius": "0.75rem (12px) for cards, 0.5rem (8px) for buttons",
+    "textures": "Clean flat surfaces. No full-screen gradients."
+  },
+  "layouts": {
+    "login": "Split screen layout. Left: Full-height image background with abstract blue architecture. Right: Centered login form with a prominent 'Entrar com o Google' (Login with Google) button.",
+    "dashboard": "Persistent Sidebar (260px wide) + Main Content Area. Main content must use a Top Metric Strip (4 KPIs like Total de Alunos, Turmas Ativas, etc.) and a CSS Grid layout below for Recharts and data tables."
+  },
+  "components": [
+    {
+      "name": "Sidebar",
+      "instructions": "Vertical navigation with lucide-react icons. Include active states with light blue background and primary blue text."
+    },
+    {
+      "name": "KPI Card",
+      "instructions": "Use Shadcn Card. Include an icon, a large metric number, and a trend indicator (e.g., '+2.5% em relação ao mês passado' in green)."
+    },
+    {
+      "name": "Charts",
+      "instructions": "Use Recharts. Line chart for 'Média de Desempenho' (Performance), Bar chart for 'Tarefas Pendentes' (Pending Tasks), Radar chart for 'Análise de Habilidades IA'. Use the custom chart colors."
+    }
+  ],
+  "image_urls": {
+    "login_background": {
+      "url": "https://images.unsplash.com/photo-1518005108369-12a8b1c429a0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHwxfHxibHVlJTIwYW5kJTIwd2hpdGUlMjBtb2Rlcm4lMjBhcmNoaXRlY3R1cmUlMjBidWlsZGluZ3xlbnwwfHx8fDE3ODQxNDQzMTl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract blue and white modern architecture building"
+    },
+    "teacher_avatar": {
+      "url": "https://images.unsplash.com/photo-1590650213165-c1fef80648c4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBzY2hvb2wlMjB0ZWFjaGVyJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg0MTQ0Mjk2fDA&ixlib=rb-4.1.0&q=85",
+      "description": "Smiling teacher in a blue blazer"
+    },
+    "student_1": {
+      "url": "https://images.pexels.com/photos/6256231/pexels-photo-6256231.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Young male student with glasses"
+    },
+    "student_2": {
+      "url": "https://images.pexels.com/photos/13538613/pexels-photo-13538613.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Teenage boy student in uniform"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Language: Entire interface MUST be in Portuguese (Brazilian). E.g., 'Alunos', 'Turmas', 'Visão Geral', 'Desempenho', 'Configurações'.",
+    "Icons: Use lucide-react for all dashboard icons.",
+    "Mock Data: Simulate Google Classroom API responses with realistic fictitious data for students, classes, and assignments.",
+    "AI Insights: Prominently feature 'Insights da IA' tags/badges highlighting predictions (e.g. 'Risco de reprovação' or 'Destaque em exatas').",
+    "Charts: Use Recharts for data visualization (LineChart, BarChart, RadarChart).",
+    "Routing: Use React Router for Login (/), Dashboard (/dashboard), Alunos (/alunos), Turmas (/turmas), and Aluno Perfil (/alunos/:id).",
+    "Install and configure font families `Manrope` and `IBM Plex Sans` in the root CSS/HTML.",
+    "Do NOT use HTML <select> or <input type='date'>. Use Shadcn components where applicable."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": "Do not make generic centered layouts. Use glass-morphism where appropriate (e.g., sticky headers). Do not apply universal transition (`transition: all`). Create depth with z-index hierarchy and subtle shadows. Do not use AI assistant emojis. Add data-testid to interactive elements. Ensure generous padding (p-6, p-8) and crisp 1px borders for structure."
+}

@@ -114,7 +114,7 @@ export default function Configuracoes() {
               <p><span className="text-muted-foreground">Nome:</span> <span className="font-medium">{user?.name}</span></p>
               <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{user?.email}</span></p>
               {user?.role && (
-                <p><span className="text-muted-foreground">Papel:</span> <span className="font-medium capitalize">{user.role === "teacher" ? "Professor(a)" : user.role === "student" ? "Aluno(a)" : user.role}</span></p>
+                <p><span className="text-muted-foreground">Papel:</span> <span className="font-medium">{user.role === "teacher" ? "Professor(a)" : user.role === "student" ? "Aluno(a)" : user.role}</span></p>
               )}
             </div>
           </div>

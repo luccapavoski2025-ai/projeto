@@ -625,6 +625,7 @@ async def list_submissions(course_id: str, cw_id: str, user: User = Depends(get_
 
 @api_router.get("/classroom/courses/{course_id}/coursework/{cw_id}/submissions/{sub_id}")
 async def get_submission(course_id: str, cw_id: str, sub_id: str, user: User = Depends(get_current_user)):
+    await _require_role(user, "teacher")
     service = await _classroom_service(user.user_id)
     try:
         sub = service.courses().courseWork().studentSubmissions().get(

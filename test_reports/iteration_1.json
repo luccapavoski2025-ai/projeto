@@ -1,0 +1,38 @@
+{
+  "summary": "First-finish smoke test for EduCRM. All 8 backend endpoints and 6 critical frontend flows verified working. Backend health OK; auth (401 without token, 200 with Bearer/cookie), classroom OAuth URL correctly generated with all required scopes; classroom/courses & students return 428 as expected; dashboard/metrics returns classroom_connected=false with zeroed KPIs. Frontend login page, /dashboard empty state, sidebar navigation, /configuracoes connect button, topbar user menu + logout button all rendered correctly. Seeded session cookie works for auth.",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "GET /api/ -> 200 {service:'EduCRM API', ok:true}",
+    "GET /api/auth/me no token -> 401 'Não autenticado'",
+    "GET /api/auth/me with Bearer seed_test_session_educrm_1 -> 200 with classroom_connected=false",
+    "POST /api/auth/logout with cookie deletes session; subsequent /auth/me -> 401",
+    "GET /api/classroom/oauth/start -> 200 auth_url points to accounts.google.com with correct client_id and required scopes (classroom.courses.readonly, classroom.rosters.readonly, classroom.coursework.students.readonly)",
+    "GET /api/classroom/courses without classroom token -> 428 'Google Classroom não conectado'",
+    "GET /api/dashboard/metrics -> classroom_connected=false, zeroed KPIs",
+    "GET /api/students -> 428",
+    "Login page renders heading 'Bem-vindo(a) de volta, professor(a).' and data-testid='login-google-button' with text 'Entrar com o Google'",
+    "/dashboard renders sidebar (nav-dashboard, nav-turmas, nav-alunos, nav-configuracoes), 'Conecte seu Google Classroom' empty state, and Insights IA sidebar card",
+    "Sidebar navigation to /turmas and /alunos works",
+    "/configuracoes shows data-testid='connect-classroom-button' with text 'Conectar Google Classroom'",
+    "Topbar user menu (data-testid='topbar-user-menu') opens dropdown and shows data-testid='logout-button' ('Sair')"
+  ],
+  "failed": [
+    {
+      "area": "backend/auth/logout",
+      "issue": "POST /api/auth/logout only deletes session when session_token cookie is present; when using Authorization: Bearer header only, the session is NOT deleted (endpoint returns 200 but the DB row remains). Frontend uses httpOnly cookie so this does not impact real-user flow, but API consumers using Bearer would leak sessions.",
+      "evidence": "curl -X POST -H 'Authorization: Bearer seed_test_session_educrm_1' /api/auth/logout returned 200 {ok:true}, but subsequent /api/auth/me with same Bearer still returned 200 with the user. Cookie-based logout worked correctly (subsequent /auth/me -> 401). Root cause: server.py line 172-174 only reads token from request.cookies, not from Authorization header.",
+      "priority": "LOW"
+    }
+  ],
+  "action_items": [
+    "(Optional/LOW) Update /api/auth/logout to also read the token from the Authorization: Bearer header (mirror get_current_user logic) so Bearer-based clients can revoke sessions."
+  ],
+  "success_rate": {"backend": "100% (8/8 required checks; logout has a minor Bearer-only edge case that does not affect the browser flow)", "frontend": "100% (all 6 required UI checks passed)"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": {
+    "session_collection": "Backend reads sessions from Mongo collection 'user_sessions' (not 'sessions'). Seed was already present when tests started.",
+    "seeded_user": "test_professor_1 / professor.demo@escola.com.br / session_token=seed_test_session_educrm_1",
+    "mocked_apis_confirmed": ["AI performance analytics are deterministic mocks — intentional per user requirement; not tested in-depth since classroom not connected in this seed."]
+  }
+}

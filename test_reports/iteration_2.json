@@ -1,0 +1,37 @@
+{
+  "summary": "Backend-only regression for the PKCE fix on Google Classroom OAuth. All 10 pytest tests passed (10/10). Verified: (1) /api/classroom/oauth/start returns 200 with an auth_url that includes code_challenge and code_challenge_method=S256, and the corresponding oauth_states document in MongoDB persists a valid PKCE code_verifier (43-128 chars, URL-safe alphabet) tied to the correct user_id; (2) /api/classroom/oauth/callback now returns 302 redirects to /configuracoes?classroom_error=... for all failure paths (no code+state, provider error=access_denied with and without error_description, invalid/unknown state, missing code) — no more 400 JSON; error_description is preferred over error in the redirect; (3) existing endpoints still healthy: GET /api/ 200, /api/auth/me with seed Bearer 200 (classroom_connected=false), /api/dashboard/metrics 200 (classroom_connected=false); (4) /api/classroom/oauth/start requires auth (401 without Bearer). Real Google OAuth token exchange not exercised (out of scope, needs browser+Google account).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_classroom_oauth.py",
+    "/app/test_reports/pytest/iteration_2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 531 lines — still under the 700-line threshold but growing; consider splitting classroom/oauth routes into a dedicated router module if more features land.",
+    "PKCE fix implementation is correct: state document stores code_verifier at /oauth/start and callback restores flow.code_verifier before flow.fetch_token(code). oauth_states doc is deleted on success to prevent replay.",
+    "Callback error branches correctly use RedirectResponse instead of HTTPException, so browser users always land on /configuracoes with a readable ?classroom_error=… (matches the frontend toast handler).",
+    "Minor: the raw Google error message (including any provider-side details) is URL-encoded into classroom_error verbatim; that's fine for debugging but consider sanitising/truncating for production to avoid overly long toasts.",
+    "Pre-existing (from iteration_1, not part of this fix): POST /api/auth/logout only clears session when the cookie is present; Bearer-only clients cannot revoke. Not blocking the browser flow."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_classroom_oauth.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "not tested (per request: backend only)"
+  },
+  "test_credentials": "MongoDB test_database, user_sessions collection: session_token='seed_test_session_educrm_1' -> user_id='test_professor_1'. Verified present before the run.",
+  "seed_data_creation": "None. Reused existing seed. Tests clean up their own oauth_states documents.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression file /app/backend/tests/test_classroom_oauth.py covers /api/classroom/oauth/start (PKCE + oauth_states persistence) and /api/classroom/oauth/callback error redirects. Run: pytest /app/backend/tests/test_classroom_oauth.py -v. Full real-Google OAuth (code exchange) still requires a browser + real Google account and cannot be automated here. Frontend toast on /configuracoes?classroom_error=... was NOT visually verified (scope: backend only) — main agent can self-test in browser if needed.",
+  "rca of the issue": "Root cause (already fixed by main agent): PKCE code_verifier generated inside a Flow object at /oauth/start was discarded when /oauth/callback constructed a brand-new Flow for token exchange, so fetch_token(code) sent no code_verifier -> Google returned 'invalid_grant: missing code verifier'. Fix persists flow.code_verifier in the oauth_states Mongo doc keyed by state, and the callback restores it onto the new Flow before fetch_token. Test evidence: oauth_states.code_verifier is a non-empty URL-safe string of length 43-128 after /oauth/start, and the Google authorization URL now contains code_challenge_method=S256. Mitigation for prod: keep the oauth_states TTL short and delete the doc on success (both already done)."
+}

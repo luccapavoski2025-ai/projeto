@@ -200,19 +200,20 @@ def _build_flow(state: Optional[str] = None) -> Flow:
 @api_router.get("/classroom/oauth/start")
 async def classroom_oauth_start(user: User = Depends(get_current_user)):
     state_token = secrets.token_urlsafe(24)
-    await db.oauth_states.insert_one(
-        {
-            "state": state_token,
-            "user_id": user.user_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
     flow = _build_flow(state_token)
     flow.redirect_uri = GOOGLE_CLASSROOM_REDIRECT_URI
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
         include_granted_scopes="true",
+    )
+    await db.oauth_states.insert_one(
+        {
+            "state": state_token,
+            "user_id": user.user_id,
+            "code_verifier": flow.code_verifier,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
     )
     return {"auth_url": auth_url}
 
@@ -236,6 +237,9 @@ async def classroom_oauth_callback(request: Request, code: str = None, state: st
 
     flow = _build_flow(state)
     flow.redirect_uri = GOOGLE_CLASSROOM_REDIRECT_URI
+    # Restore PKCE code_verifier that was generated during /oauth/start.
+    if state_doc.get("code_verifier"):
+        flow.code_verifier = state_doc["code_verifier"]
     try:
         flow.fetch_token(code=code)
     except Exception as e:

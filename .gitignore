@@ -32,17 +32,8 @@ dist
 
 # Environment files (comprehensive coverage)
 
-# Env files
-.env
-backend/.env
-frontend/.env
-
 *token.json*
 *credentials.json*
-
-# Emergent markers and runtime artifacts
-.emergent/
-.emergent/markers/
 
 # Logs and debug files
 npm-debug.log*
@@ -89,3 +80,4 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/frontend/node_modules/.cache/default-development/0.pack
+frontend/node_modules/.cache/default-development/0.pack
